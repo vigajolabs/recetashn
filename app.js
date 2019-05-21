@@ -1,6 +1,6 @@
 'use strict';
 
-const apiai = require('apiai');
+const dialogflow = require('dialogflow');
 const config = require('./config');
 const express = require('express');
 const crypto = require('crypto');
@@ -8,32 +8,64 @@ const bodyParser = require('body-parser');
 const request = require('request');
 const app = express();
 const uuid = require('uuid');
+const pg = require('pg');
+const broadcast = require('./routes/broadcast');
+const webviews = require('./routes/webviews');
+//const userService = require('./services/user-service');
+const userService = require('./user');
+const colors = require('./colors');
+let dialogflowService = require('./services/dialogflow-service');
+const fbService = require('./services/fb-service');
+const passport = require('passport');
+const FacebookStrategy = require('passport-facebook').Strategy;
+const session = require('express-session');
 
+//---------
+const imagesopas="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS68eVtaZ3c6xmmFs72JTgbr8F6ozrGg25xu8PwdrumxozrxfNU";
+const imagesrapidas="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSEYwEJXv2mP-jHnt-3rFfWUTTXjeSzdVXb8nAdyk1NjVggxF_lBw";
+const imagespollo="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTFHO8yhXCy9Z5SWlfLB9PLYKjbKcAyZOajZjiyVCn2jp79cxxTpQ";
+const imagespasta="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSG-BgcWo-iHOYKN5iq8EeOfAkJYiFeyOhz2TYzY7QuM3RprkjH";
 
 // Messenger API parameters
 if (!config.FB_PAGE_TOKEN) {
-	throw new Error('missing FB_PAGE_TOKEN');
+    throw new Error('missing FB_PAGE_TOKEN');
 }
 if (!config.FB_VERIFY_TOKEN) {
-	throw new Error('missing FB_VERIFY_TOKEN');
+    throw new Error('missing FB_VERIFY_TOKEN');
 }
-if (!config.API_AI_CLIENT_ACCESS_TOKEN) {
-	throw new Error('missing API_AI_CLIENT_ACCESS_TOKEN');
+if (!config.GOOGLE_PROJECT_ID) {
+    throw new Error('missing GOOGLE_PROJECT_ID');
+}
+if (!config.DF_LANGUAGE_CODE) {
+    throw new Error('missing DF_LANGUAGE_CODE');
+}
+if (!config.GOOGLE_CLIENT_EMAIL) {
+    throw new Error('missing GOOGLE_CLIENT_EMAIL');
+}
+if (!config.GOOGLE_PRIVATE_KEY) {
+    throw new Error('missing GOOGLE_PRIVATE_KEY');
 }
 if (!config.FB_APP_SECRET) {
-	throw new Error('missing FB_APP_SECRET');
+    throw new Error('missing FB_APP_SECRET');
 }
 if (!config.SERVER_URL) { //used for ink to static files
-	throw new Error('missing SERVER_URL');
+    throw new Error('missing SERVER_URL');
 }
 
-
+if (!config.PG_CONFIG) { //pg config
+    throw new Error('missing PG_CONFIG');
+}
+if (!config.ADMIN_ID) { //admin id for login
+    throw new Error('missing ADMIN_ID');
+}
 
 app.set('port', (process.env.PORT || 5000))
 
+pg.defaults.ssl = true;
+
 //verify request came from facebook
 app.use(bodyParser.json({
-	verify: verifyRequestSignature
+    verify: fbService.verifyRequestSignature
 }));
 
 //serve static files in the public directory
@@ -41,35 +73,92 @@ app.use(express.static('public'));
 
 // Process application/x-www-form-urlencoded
 app.use(bodyParser.urlencoded({
-	extended: false
-}))
+    extended: false
+}));
 
 // Process application/json
-app.use(bodyParser.json())
+app.use(bodyParser.json());
 
 
+app.use(session(
+    {
+        secret: 'keyboard cat',
+        resave: true,
+        saveUninitilized: true
+    }
+));
 
 
-const apiAiService = apiai(config.API_AI_CLIENT_ACCESS_TOKEN, {
-	language: "en",
-	requestSource: "fb"
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.serializeUser(function(profile, cb) {
+    cb(null, profile);
 });
+
+passport.deserializeUser(function(profile, cb) {
+    cb(null, profile);
+});
+
+passport.use(new FacebookStrategy({
+        clientID: config.FB_APP_ID,
+        clientSecret: config.FB_APP_SECRET,
+        callbackURL: config.SERVER_URL + "auth/facebook/callback"
+    },
+    function(accessToken, refreshToken, profile, cb) {
+        process.nextTick(function() {
+            return cb(null, profile);
+        });
+    }
+));
+
+app.get('/auth/facebook', passport.authenticate('facebook',{scope:'public_profile'}));
+
+
+app.get('/auth/facebook/callback',
+    passport.authenticate('facebook', { successRedirect : '/broadcast/broadcast', failureRedirect: '/broadcast' }));
+
+
+
+app.set('view engine', 'ejs');
+
+
+
+const credentials = {
+    client_email: config.GOOGLE_CLIENT_EMAIL,
+    private_key: config.GOOGLE_PRIVATE_KEY,
+};
+
+const sessionClient = new dialogflow.SessionsClient(
+    {
+        projectId: config.GOOGLE_PROJECT_ID,
+        credentials
+    }
+);
+
+
 const sessionIds = new Map();
+const usersMap = new Map();
 
 // Index route
 app.get('/', function (req, res) {
-	res.send('Hello world, I am a chat bot')
+    res.send('Hello world, I am a chat bot')
 })
+
+app.use('/broadcast', broadcast);
+app.use('/webviews', webviews);
+
+
 
 // for Facebook verification
 app.get('/webhook/', function (req, res) {
-	console.log("request");
-	if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === config.FB_VERIFY_TOKEN) {
-		res.status(200).send(req.query['hub.challenge']);
-	} else {
-		console.error("Failed validation. Make sure the validation tokens match.");
-		res.sendStatus(403);
-	}
+    console.log("request");
+    if (req.query['hub.mode'] === 'subscribe' && req.query['hub.verify_token'] === config.FB_VERIFY_TOKEN) {
+        res.status(200).send(req.query['hub.challenge']);
+    } else {
+        console.error("Failed validation. Make sure the validation tokens match.");
+        res.sendStatus(403);
+    }
 })
 
 /*
@@ -80,627 +169,418 @@ app.get('/webhook/', function (req, res) {
  *
  */
 app.post('/webhook/', function (req, res) {
-	var data = req.body;
-	console.log(JSON.stringify(data));
+    var data = req.body;
+    console.log(JSON.stringify(data));
 
+    // Make sure this is a page subscription
+    if (data.object == 'page') {
+        // Iterate over each entry
+        // There may be multiple if batched
+        data.entry.forEach(function (pageEntry) {
+            var pageID = pageEntry.id;
+            var timeOfEvent = pageEntry.time;
 
+            // Iterate over each messaging event
+            pageEntry.messaging.forEach(function (messagingEvent) {
+                if (messagingEvent.optin) {
+                    fbService.receivedAuthentication(messagingEvent);
+                } else if (messagingEvent.message) {
+                    receivedMessage(messagingEvent);
+                } else if (messagingEvent.delivery) {
+                    fbService.receivedDeliveryConfirmation(messagingEvent);
+                } else if (messagingEvent.postback) {
+                    receivedPostback(messagingEvent);
+                } else if (messagingEvent.read) {
+                    fbService.receivedMessageRead(messagingEvent);
+                } else if (messagingEvent.account_linking) {
+                    fbService.receivedAccountLink(messagingEvent);
+                } else {
+                    console.log("Webhook received unknown messagingEvent: ", messagingEvent);
+                }
+            });
+        });
 
-	// Make sure this is a page subscription
-	if (data.object == 'page') {
-		// Iterate over each entry
-		// There may be multiple if batched
-		data.entry.forEach(function (pageEntry) {
-			var pageID = pageEntry.id;
-			var timeOfEvent = pageEntry.time;
-
-			// Iterate over each messaging event
-			pageEntry.messaging.forEach(function (messagingEvent) {
-				if (messagingEvent.optin) {
-					receivedAuthentication(messagingEvent);
-				} else if (messagingEvent.message) {
-					receivedMessage(messagingEvent);
-				} else if (messagingEvent.delivery) {
-					receivedDeliveryConfirmation(messagingEvent);
-				} else if (messagingEvent.postback) {
-					receivedPostback(messagingEvent);
-				} else if (messagingEvent.read) {
-					receivedMessageRead(messagingEvent);
-				} else if (messagingEvent.account_linking) {
-					receivedAccountLink(messagingEvent);
-				} else {
-					console.log("Webhook received unknown messagingEvent: ", messagingEvent);
-				}
-			});
-		});
-
-		// Assume all went well.
-		// You must send back a 200, within 20 seconds
-		res.sendStatus(200);
-	}
+        // Assume all went well.
+        // You must send back a 200, within 20 seconds
+        res.sendStatus(200);
+    }
 });
 
 
+function setSessionAndUser(senderID) {
+    if (!sessionIds.has(senderID)) {
+        sessionIds.set(senderID, uuid.v1());
+    }
 
+    if (!usersMap.has(senderID)) {
+        userService.addUser(function(user){
+            usersMap.set(senderID, user);
+        }, senderID);
+    }
+}
 
 
 function receivedMessage(event) {
 
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
-	var timeOfMessage = event.timestamp;
-	var message = event.message;
+    var senderID = event.sender.id;
+    var recipientID = event.recipient.id;
+    var timeOfMessage = event.timestamp;
+    var message = event.message;
 
-	if (!sessionIds.has(senderID)) {
-		sessionIds.set(senderID, uuid.v1());
-	}
-	//console.log("Received message for user %d and page %d at %d with message:", senderID, recipientID, timeOfMessage);
-	//console.log(JSON.stringify(message));
+    setSessionAndUser(senderID);
 
-	var isEcho = message.is_echo;
-	var messageId = message.mid;
-	var appId = message.app_id;
-	var metadata = message.metadata;
+    //console.log("Received message for user %d and page %d at %d with message:", senderID, recipientID, timeOfMessage);
+    //console.log(JSON.stringify(message));
 
-	// You may get a text or attachment but not both
-	var messageText = message.text;
-	var messageAttachments = message.attachments;
-	var quickReply = message.quick_reply;
+    var isEcho = message.is_echo;
+    var messageId = message.mid;
+    var appId = message.app_id;
+    var metadata = message.metadata;
 
-	if (isEcho) {
-		handleEcho(messageId, appId, metadata);
-		return;
-	} else if (quickReply) {
-		handleQuickReply(senderID, quickReply, messageId);
-		return;
-	}
+    // You may get a text or attachment but not both
+    var messageText = message.text;
+    var messageAttachments = message.attachments;
+    var quickReply = message.quick_reply;
+
+    if (isEcho) {
+        fbService.handleEcho(messageId, appId, metadata);
+        return;
+    } else if (quickReply) {
+        handleQuickReply(senderID, quickReply, messageId);
+        return;
+    }
 
 
-	if (messageText) {
-		//send message to api.ai
-		sendToApiAi(senderID, messageText);
-	} else if (messageAttachments) {
-		handleMessageAttachments(messageAttachments, senderID);
-	}
+    if (messageText) {
+        //send message to DialogFlow
+        dialogflowService.sendTextQueryToDialogFlow(sessionIds, handleDialogFlowResponse, senderID, messageText);
+    } else if (messageAttachments) {
+        fbService.handleMessageAttachments(messageAttachments, senderID);
+    }
 }
 
-
-function handleMessageAttachments(messageAttachments, senderID){
-	//for now just reply
-	sendTextMessage(senderID, "Attachment received. Thank you.");	
-}
 
 function handleQuickReply(senderID, quickReply, messageId) {
-	var quickReplyPayload = quickReply.payload;
-	console.log("Quick reply for message %s with payload %s", messageId, quickReplyPayload);
-	//send payload to api.ai
-	sendToApiAi(senderID, quickReplyPayload);
-}
-
-//https://developers.facebook.com/docs/messenger-platform/webhook-reference/message-echo
-function handleEcho(messageId, appId, metadata) {
-	// Just logging message echoes to console
-	console.log("Received echo for message %s and app %d with metadata %s", messageId, appId, metadata);
-}
-
-function handleApiAiAction(sender, action, responseText, contexts, parameters) {
-	switch (action) {
-		default:
-			//unhandled action, just send back the text
-			sendTextMessage(sender, responseText);
-	}
-}
-
-function handleMessage(message, sender) {
-	switch (message.type) {
-		case 0: //text
-			sendTextMessage(sender, message.speech);
-			break;
-		case 2: //quick replies
-			let replies = [];
-			for (var b = 0; b < message.replies.length; b++) {
-				let reply =
-				{
-					"content_type": "text",
-					"title": message.replies[b],
-					"payload": message.replies[b]
-				}
-				replies.push(reply);
-			}
-			sendQuickReply(sender, message.title, replies);
-			break;
-		case 3: //image
-			sendImageMessage(sender, message.imageUrl);
-			break;
-		case 4:
-			// custom payload
-			var messageData = {
-				recipient: {
-					id: sender
-				},
-				message: message.payload.facebook
-
-			};
-
-			callSendAPI(messageData);
-
-			break;
-	}
+    var quickReplyPayload = quickReply.payload;
+    switch (quickReplyPayload) {
+       
+        default:
+            dialogflowService.sendTextQueryToDialogFlow(sessionIds, handleDialogFlowResponse, senderID, quickReplyPayload);
+            break;
+    }
 }
 
 
-function handleCardMessages(messages, sender) {
+function handleDialogFlowAction(sender, action, messages, contexts, parameters) {
+    switch (action) {
 
-	let elements = [];
-	for (var m = 0; m < messages.length; m++) {
-		let message = messages[m];
-		let buttons = [];
-		for (var b = 0; b < message.buttons.length; b++) {
-			let isLink = (message.buttons[b].postback.substring(0, 4) === 'http');
-			let button;
-			if (isLink) {
-				button = {
-					"type": "web_url",
-					"title": message.buttons[b].text,
-					"url": message.buttons[b].postback
-				}
-			} else {
-				button = {
-					"type": "postback",
-					"title": message.buttons[b].text,
-					"payload": message.buttons[b].postback
-				}
-			}
-			buttons.push(button);
-		}
+      //inicio
+
+      case "preguntas.recibirrecetas":
+      console.log(parameters.fields);
+      if (parameters.fields['RespuestaNoti'].stringValue=="SiNoti"){
+         //------------  
+        userService.newsletterSettings(function(updated) {
+         if (updated) {
+          } 
+           }, 1, sender);
+        //-------------
+        setTimeout(function(){
+           let buttons = [
+                     {
+                        type:"postback",
+                        title:"Rápidas 🏍️",
+                        payload:"CatRapidas"
+                     },  
+                     {
+                        type:"postback",
+                        title:"Pollo 🍗",
+                        payload:"CatPollo"
+                     },
+                     {
+                         type:"postback",
+                        title:"Sopas 🍲 ",
+                        payload:"CatSopas"
+                     },
+                   ];
+                 fbService.sendButtonMessage(sender, "Que tipo de recetas te gustaría te envíemos? Puedes seleccionar varias", buttons);
+                },300) 
+               setTimeout(function() {
+              let buttons = [
+              {
+               type:"postback",
+               title:"Pasta 🍝",
+               payload:"CatPasta"
+              },  
+              // {
+              //  type:"postback",
+              //  title:"FARMACIAS ⚕️💊 ",
+              //  payload:"CatFARM"
+              // },
+                    // {
+                    //      type:"postback",
+                    //     title:"PERFUMES Y LOCIONES",
+                    //     payload:"CatPerfume"
+                    // },
+              ];
+            fbService.sendButtonMessage(sender, "✨", buttons);
+           },600) 
+      //---------------------
+          setTimeout(function(){
+            let replies = [
+              {
+              "content_type":"text",
+              "title":"MENU INICIO",
+              "payload":"INICIO"
+              },  
+             ];  
+            fbService.sendQuickReply(sender,"Regresa a menu de recetas ",replies);  
+          },1500)
+      } else if (parameters.fields['RespuestaNoti'].stringValue=="NoNoti"){  
+     //---------------------   
+          userService.newsletterSettings(function(updated) {
+           if (updated) {
+            } 
+             }, 0, sender);
+     //---------------------
+          setTimeout(function(){
+             let elements =[  
+                {
+                "title":"Pollo 🍗",
+                "image_url":imagespollo,
+                "subtitle":"RECETAS con POLLO",
+        
+                  "buttons":[
+                      {
+                       "type":"postback",
+                        "title":"INGREDIENTES",
+                        "payload":"RecetasPollo"
+                       },               
+                      ]         
+                },
+                {
+                "title":"Pasta 🍝",
+                "image_url":imagespasta,
+                "subtitle":"Recetas de Pastas",
+
+                   "buttons":[
+                       {
+                        "type":"postback",
+                        "title":"INGREDIENTES",
+                        "payload":"RecetasPasta"
+                        },            
+                      ]           
+                    },
+                    {
+                   "title":"Sopas 🍲",
+                    "image_url":imagesopas,
+                    "subtitle":"Delicioso Recetas de Sopas",
+
+                      "buttons":[
+                          {
+                             "type":"postback",
+                            "title":"INGREDIENTES",
+                            "payload":"RecetasSopa"
+                           },
+                          // {
+                          //   "type":"web_url",
+                          //   "url":"https://www.detektor.com.hn/video/Detektor-smart.mp4",
+                          //   "title":"Como Funciona",
+                          //   "webview_height_ratio": "tall"
+                          //  },
+                     ]        
+                    },
+                     {
+                   "title":"Rápidas ⏱",
+                    "image_url":imagesrapidas,
+                    "subtitle":"Recetas Rápidas y de bajo precio",
+
+                      "buttons":[
+                          {
+                             "type":"postback",
+                            "title":"INGREDIENTES",
+                            "payload":"RecetasRapidas"
+                           },       
+                       ]           
+                    },
+                   
+                    ];
+                    fbService.sendGenericMessage(sender, elements); 
+                },500)
+                 setTimeout(function(){
+                let replies = [
+                 {
+                  "content_type":"text",
+                  "title":"MENU INICIO",
+                  "payload":"INICIO"
+                 },  
+               ];  
+         fbService.sendQuickReply(sender,"Regresa a menú de recetas ",replies);  
+          },1500)
+         }
+      break;
 
 
-		let element = {
-			"title": message.title,
-			"image_url":message.imageUrl,
-			"subtitle": message.subtitle,
-			"buttons": buttons
-		};
-		elements.push(element);
-	}
-	sendGenericMessage(sender, elements);
+      
+        default:
+            //unhandled action, just send back the text
+            fbService.handleMessages(messages, sender);
+    }
+}
+
+//---------------
+function callSendAPI (messageData) {
+        request({
+            uri: 'https://graph.facebook.com/v2.6/me/messages',
+            qs: {
+                access_token: config.FB_PAGE_TOKEN
+            },
+            method: 'POST',
+            json: messageData
+
+        }, function (error, response, body) {
+            if (!error && response.statusCode == 200) {
+                var recipientId = body.recipient_id;
+                var messageId = body.message_id;
+
+                if (messageId) {
+                    console.log("Successfully sent message with id %s to recipient %s",
+                        messageId, recipientId);
+                } else {
+                    console.log("Successfully called Send API for recipient %s",
+                        recipientId);
+                }
+            } else {
+                console.error("Failed calling Send API", response.statusCode, response.statusMessage, body.error);
+            }
+        });
+    }
+
+    function sendAudioMessage(recipientId,Audioname) {
+   // function sendAudioMessage(recipientId) {
+        //let self = module.exports;
+        var messageData = {
+            recipient: {
+                id: recipientId
+            },
+            message: {
+                attachment: {
+                    type: "audio",
+                    payload: {
+                        url: config.SERVER_URL + Audioname
+                        //url: config.SERVER_URL + "/assets/Doctor.mp3"
+                    }
+                }
+            }
+        };
+        callSendAPI(messageData);
+       // self.callSendAPI(messageData);
+    }
+
+    function sendGifMessage(recipientId){
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            attachment: {
+                type: "image",
+                payload: {
+                    url: config.SERVER_URL + "/assets/hello-1.gif"  //Gifname
+                }
+            }
+        }
+    };
+    callSendAPI(messageData);
+    }
+
+
+
+    function sendTextMessage(recipientId, text) {
+    var messageData = {
+        recipient: {
+            id: recipientId
+        },
+        message: {
+            text: text
+        }
+    }
+    callSendAPI(messageData);
+}
+//--------------
+
+function handleMessages(messages, sender) {
+    let timeoutInterval = 1100;
+    let previousType ;
+    let cardTypes = [];
+    let timeout = 0;
+    for (var i = 0; i < messages.length; i++) {
+
+        if ( previousType == "card" && (messages[i].message != "card" || i == messages.length - 1)) {
+            timeout = (i - 1) * timeoutInterval;
+            setTimeout(handleCardMessages.bind(null, cardTypes, sender), timeout);
+            cardTypes = [];
+            timeout = i * timeoutInterval;
+            setTimeout(handleMessage.bind(null, messages[i], sender), timeout);
+        } else if ( messages[i].message == "card" && i == messages.length - 1) {
+            cardTypes.push(messages[i]);
+            timeout = (i - 1) * timeoutInterval;
+            setTimeout(handleCardMessages.bind(null, cardTypes, sender), timeout);
+            cardTypes = [];
+        } else if ( messages[i].message == "card") {
+            cardTypes.push(messages[i]);
+        } else  {
+
+            timeout = i * timeoutInterval;
+            setTimeout(handleMessage.bind(null, messages[i], sender), timeout);
+        }
+
+        previousType = messages[i].message;
+
+    }
+}
+
+function handleDialogFlowResponse(sender, response) {
+    let responseText = response.fulfillmentMessages.fulfillmentText;
+
+    let messages = response.fulfillmentMessages;
+    let action = response.action;
+    let contexts = response.outputContexts;
+    let parameters = response.parameters;
+
+    fbService.sendTypingOff(sender);
+
+    if (fbService.isDefined(action)) {
+        handleDialogFlowAction(sender, action, messages, contexts, parameters);
+    } else if (fbService.isDefined(messages)) {
+        fbService.handleMessages(messages, sender);
+    } else if (responseText == '' && !fbService.isDefined(action)) {
+        //dialogflow could not evaluate input.
+        fbService.sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
+    } else if (fbService.isDefined(responseText)) {
+        fbService.sendTextMessage(sender, responseText);
+    }
 }
 
 
-function handleApiAiResponse(sender, response) {
-	let responseText = response.result.fulfillment.speech;
-	let responseData = response.result.fulfillment.data;
-	let messages = response.result.fulfillment.messages;
-	let action = response.result.action;
-	let contexts = response.result.contexts;
-	let parameters = response.result.parameters;
-
-	sendTypingOff(sender);
-
-	if (isDefined(messages) && (messages.length == 1 && messages[0].type != 0 || messages.length > 1)) {
-		let timeoutInterval = 1100;
-		let previousType ;
-		let cardTypes = [];
-		let timeout = 0;
-		for (var i = 0; i < messages.length; i++) {
-
-			if ( previousType == 1 && (messages[i].type != 1 || i == messages.length - 1)) {
-
-				timeout = (i - 1) * timeoutInterval;
-				setTimeout(handleCardMessages.bind(null, cardTypes, sender), timeout);
-				cardTypes = [];
-				timeout = i * timeoutInterval;
-				setTimeout(handleMessage.bind(null, messages[i], sender), timeout);
-			} else if ( messages[i].type == 1 && i == messages.length - 1) {
-				cardTypes.push(messages[i]);
-                		timeout = (i - 1) * timeoutInterval;
-                		setTimeout(handleCardMessages.bind(null, cardTypes, sender), timeout);
-                		cardTypes = [];
-			} else if ( messages[i].type == 1 ) {
-				cardTypes.push(messages[i]);
-			} else {
-				timeout = i * timeoutInterval;
-				setTimeout(handleMessage.bind(null, messages[i], sender), timeout);
-			}
-
-			previousType = messages[i].type;
-
-		}
-	} else if (responseText == '' && !isDefined(action)) {
-		//api ai could not evaluate input.
-		console.log('Unknown query' + response.result.resolvedQuery);
-		sendTextMessage(sender, "I'm not sure what you want. Can you be more specific?");
-	} else if (isDefined(action)) {
-		handleApiAiAction(sender, action, responseText, contexts, parameters);
-	} else if (isDefined(responseData) && isDefined(responseData.facebook)) {
-		try {
-			console.log('Response as formatted message' + responseData.facebook);
-			sendTextMessage(sender, responseData.facebook);
-		} catch (err) {
-			sendTextMessage(sender, err.message);
-		}
-	} else if (isDefined(responseText)) {
-
-		sendTextMessage(sender, responseText);
-	}
+async function resolveAfterXSeconds(x) {
+    return new Promise(resolve => {
+        setTimeout(() => {
+            resolve(x);
+        }, x * 1000);
+    });
 }
 
-function sendToApiAi(sender, text) {
-
-	sendTypingOn(sender);
-	let apiaiRequest = apiAiService.textRequest(text, {
-		sessionId: sessionIds.get(sender)
-	});
-
-	apiaiRequest.on('response', (response) => {
-		if (isDefined(response.result)) {
-			handleApiAiResponse(sender, response);
-		}
-	});
-
-	apiaiRequest.on('error', (error) => console.error(error));
-	apiaiRequest.end();
+async function greetUserText(userId) {
+    let user = usersMap.get(userId);
+    if (!user) {
+        await resolveAfterXSeconds(2);
+        user = usersMap.get(userId);
+    }
+    fbService.sendTextMessage(userId, "Hola " + user.first_name + '! ');
 }
 
 
-
-
-function sendTextMessage(recipientId, text) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			text: text
-		}
-	}
-	callSendAPI(messageData);
-}
-
-/*
- * Send an image using the Send API.
- *
- */
-function sendImageMessage(recipientId, imageUrl) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "image",
-				payload: {
-					url: imageUrl
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a Gif using the Send API.
- *
- */
-function sendGifMessage(recipientId) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "image",
-				payload: {
-					url: config.SERVER_URL + "/assets/instagram_logo.gif"
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send audio using the Send API.
- *
- */
-function sendAudioMessage(recipientId) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "audio",
-				payload: {
-					url: config.SERVER_URL + "/assets/sample.mp3"
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a video using the Send API.
- * example videoName: "/assets/allofus480.mov"
- */
-function sendVideoMessage(recipientId, videoName) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "video",
-				payload: {
-					url: config.SERVER_URL + videoName
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a video using the Send API.
- * example fileName: fileName"/assets/test.txt"
- */
-function sendFileMessage(recipientId, fileName) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "file",
-				payload: {
-					url: config.SERVER_URL + fileName
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-
-
-/*
- * Send a button message using the Send API.
- *
- */
-function sendButtonMessage(recipientId, text, buttons) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "template",
-				payload: {
-					template_type: "button",
-					text: text,
-					buttons: buttons
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-
-function sendGenericMessage(recipientId, elements) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "template",
-				payload: {
-					template_type: "generic",
-					elements: elements
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-
-function sendReceiptMessage(recipientId, recipient_name, currency, payment_method,
-							timestamp, elements, address, summary, adjustments) {
-	// Generate a random receipt ID as the API requires a unique ID
-	var receiptId = "order" + Math.floor(Math.random() * 1000);
-
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "template",
-				payload: {
-					template_type: "receipt",
-					recipient_name: recipient_name,
-					order_number: receiptId,
-					currency: currency,
-					payment_method: payment_method,
-					timestamp: timestamp,
-					elements: elements,
-					address: address,
-					summary: summary,
-					adjustments: adjustments
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a message with Quick Reply buttons.
- *
- */
-function sendQuickReply(recipientId, text, replies, metadata) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			text: text,
-			metadata: isDefined(metadata)?metadata:'',
-			quick_replies: replies
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a read receipt to indicate the message has been read
- *
- */
-function sendReadReceipt(recipientId) {
-
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		sender_action: "mark_seen"
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Turn typing indicator on
- *
- */
-function sendTypingOn(recipientId) {
-
-
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		sender_action: "typing_on"
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Turn typing indicator off
- *
- */
-function sendTypingOff(recipientId) {
-
-
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		sender_action: "typing_off"
-	};
-
-	callSendAPI(messageData);
-}
-
-/*
- * Send a message with the account linking call-to-action
- *
- */
-function sendAccountLinking(recipientId) {
-	var messageData = {
-		recipient: {
-			id: recipientId
-		},
-		message: {
-			attachment: {
-				type: "template",
-				payload: {
-					template_type: "button",
-					text: "Welcome. Link your account.",
-					buttons: [{
-						type: "account_link",
-						url: config.SERVER_URL + "/authorize"
-          }]
-				}
-			}
-		}
-	};
-
-	callSendAPI(messageData);
-}
-
-
-function greetUserText(userId) {
-	//first read user firstname
-	request({
-		uri: 'https://graph.facebook.com/v2.7/' + userId,
-		qs: {
-			access_token: config.FB_PAGE_TOKEN
-		}
-
-	}, function (error, response, body) {
-		if (!error && response.statusCode == 200) {
-
-			var user = JSON.parse(body);
-
-			if (user.first_name) {
-				console.log("FB user: %s %s, %s",
-					user.first_name, user.last_name, user.gender);
-
-				sendTextMessage(userId, "Welcome " + user.first_name + '!');
-			} else {
-				console.log("Cannot get data for fb user with id",
-					userId);
-			}
-		} else {
-			console.error(response.error);
-		}
-
-	});
-}
-
-/*
- * Call the Send API. The message data goes in the body. If successful, we'll 
- * get the message id in a response 
- *
- */
-function callSendAPI(messageData) {
-	request({
-		uri: 'https://graph.facebook.com/v2.6/me/messages',
-		qs: {
-			access_token: config.FB_PAGE_TOKEN
-		},
-		method: 'POST',
-		json: messageData
-
-	}, function (error, response, body) {
-		if (!error && response.statusCode == 200) {
-			var recipientId = body.recipient_id;
-			var messageId = body.message_id;
-
-			if (messageId) {
-				console.log("Successfully sent message with id %s to recipient %s",
-					messageId, recipientId);
-			} else {
-				console.log("Successfully called Send API for recipient %s",
-					recipientId);
-			}
-		} else {
-			console.error("Failed calling Send API", response.statusCode, response.statusMessage, body.error);
-		}
-	});
-}
 
 
 
@@ -712,161 +592,427 @@ function callSendAPI(messageData) {
  * 
  */
 function receivedPostback(event) {
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
-	var timeOfPostback = event.timestamp;
+    var senderID = event.sender.id;
+    var recipientID = event.recipient.id;
+    var timeOfPostback = event.timestamp;
 
-	// The 'payload' param is a developer-defined field which is set in a postback 
-	// button for Structured Messages. 
-	var payload = event.postback.payload;
+    setSessionAndUser(senderID);
 
-	switch (payload) {
-		default:
-			//unindentified payload
-			sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
-			break;
+    // The 'payload' param is a developer-defined field which is set in a postback 
+    // button for Structured Messages. 
+    var payload = event.postback.payload;
 
-	}
+    switch (payload) {
 
-	console.log("Received postback for user %d and page %d with payload '%s' " +
-		"at %d", senderID, recipientID, payload, timeOfPostback);
+        case 'GET_STARTED':
+        //fbService.sendGifMessage(senderID,"/assets/hello-1.gif");
+        setTimeout(function(){
+        greetUserText(senderID);
+        },1800) 
+        fbService.sendTypingOn(senderID);
+        setTimeout(function(){
+            let buttons = [
+          // {
+          //   type:"postback",
+          //   title:"INICIAR sin ENVIO",
+          //   payload:"INICIAR_CIBO"
+          // },
+           {
+            type:"postback",
+            title:"INICIAR",
+            payload:"INICIAR_CIBO"
+          },
+        ];
+        fbService.sendButtonMessage(senderID, "Hola, mi nombre es CIBO, soy tu asistente virtual y estoy para ayudarte con algunas recetas!! 🍽 😀", buttons);    
+        },3000)
+        break;
 
-}
+        case 'INICIAR_CIBO':
+        colors.Readall(function(elementos){
+         console.log(elementos);
+          const todos=elementos.map(function(resultados){  
+           const fbid=resultados.fb_id;
+            const noti=resultados.newsletter;
+             const nombre=resultados.first_name;
+              if (noti===null){
+              setTimeout(function(){
+             let replies = [
+              {
+              "content_type":"text",
+              "title":"SI",
+              "payload":"SiNoti"
+              },
+              {
+              "content_type":"text",
+              "title":"NO",
+              "payload":"NoNoti"
+              },
+            ];    
+            fbService.sendQuickReply(senderID,"Te gustaría que te envíara recetas? ",replies);  //responseText
+             },1500)
+            } else {
+              setTimeout(function(){
+              let elements =[  
+                {
+                "title":"Pollo 🍗",
+                "image_url":imagespollo,
+                "subtitle":"Recetas con Pollo",
+        
+                  "buttons":[
+                      {
+                       "type":"postback",
+                        "title":"VER RECETAS",
+                        "payload":"RecetasPollo"
+                       },               
+                      ]         
+                },
+                {
+                "title":"Pasta 🍝",
+                "image_url":imagespasta,
+                "subtitle":"Recetas de Pastas",
 
+                   "buttons":[
+                       {
+                        "type":"postback",
+                        "title":"VER RECETAS",
+                        "payload":"RecetasPasta"
+                        },            
+                      ]           
+                    },
+                    {
+                   "title":"Sopas 🍲",
+                    "image_url":imagesopas,
+                    "subtitle":"Delicioso Recetas de Sopas",
 
-/*
- * Message Read Event
- *
- * This event is called when a previously-sent message has been read.
- * https://developers.facebook.com/docs/messenger-platform/webhook-reference/message-read
- * 
- */
-function receivedMessageRead(event) {
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
+                      "buttons":[
+                          {
+                             "type":"postback",
+                            "title":"VER RECETAS",
+                            "payload":"RecetasSopa"
+                           },
+                          // {
+                          //   "type":"web_url",
+                          //   "url":"https://www.detektor.com.hn/video/Detektor-smart.mp4",
+                          //   "title":"Como Funciona",
+                          //   "webview_height_ratio": "tall"
+                          //  },
+                     ]        
+                    },
+                     {
+                   "title":"Rápidas ⏱",
+                    "image_url":imagesrapidas,
+                    "subtitle":"Recetas Rápidas y de bajo precio",
 
-	// All messages before watermark (a timestamp) or sequence have been seen.
-	var watermark = event.read.watermark;
-	var sequenceNumber = event.read.seq;
+                      "buttons":[
+                          {
+                             "type":"postback",
+                            "title":"VER RECETAS",
+                            "payload":"RecetasRapidas"
+                           },       
+                       ]           
+                    },
+                   
+                    ];
+                    fbService.sendGenericMessage(senderID, elements); 
+                },500)
+                 setTimeout(function(){
+                let replies = [
+                 {
+                  "content_type":"text",
+                  "title":"MENU INICIO",
+                  "payload":"INICIAR_CIBO"
+                 },  
+               ];  
+              fbService.sendQuickReply(senderID,"Regresa a menu de recetas ",replies);  
+             },1500)
+           }
+          }) 
+         },senderID)
+        break;
 
-	console.log("Received message read event for watermark %d and sequence " +
-		"number %d", watermark, sequenceNumber);
-}
+        case 'RecetasRapidas':
+         colors.RecetasRapidas(function(elementos){
+        });    
+        break;
 
-/*
- * Account Link Event
- *
- * This event is called when the Link Account or UnLink Account action has been
- * tapped.
- * https://developers.facebook.com/docs/messenger-platform/webhook-reference/account-linking
- * 
- */
-function receivedAccountLink(event) {
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
+        case 'RecetasSopa':
+        //fbService.sendTextMessage(senderID,"Sopa");
+         colors.RecetasSopas(function(elementos){
+        });   
+        break;
 
-	var status = event.account_linking.status;
-	var authCode = event.account_linking.authorization_code;
+        case 'RecetasPasta':
+         colors.RecetasPasta(function(elementos){
+        });   
+        break;
 
-	console.log("Received account link event with for user %d with status %s " +
-		"and auth code %s ", senderID, status, authCode);
-}
+        case 'RecetasPollo':
+         colors.RecetasPollo(function(elementos){
+          console.log(elementos);
+           setTimeout(function(){
+            let elements =[  
+             {
+              "title":elementos[0].nombre,
+              "image_url":elementos[0].urlimagen,
+              "subtitle":elementos[0].descrip,
+        
+              "buttons":[
+               {
+                "type":"postback",
+                "title":"INGREDIENTES",
+                "payload":"receta0"
+               },   
+                    
+                ]         
+              },
+              {
+                "title":elementos[1].nombre,
+                "image_url":elementos[1].urlimagen,
+                "subtitle":elementos[1].descrip,
 
-/*
- * Delivery Confirmation Event
- *
- * This event is sent to confirm the delivery of a message. Read more about 
- * these fields at https://developers.facebook.com/docs/messenger-platform/webhook-reference/message-delivered
- *
- */
-function receivedDeliveryConfirmation(event) {
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
-	var delivery = event.delivery;
-	var messageIDs = delivery.mids;
-	var watermark = delivery.watermark;
-	var sequenceNumber = delivery.seq;
+                "buttons":[
+                 {
+                   "type":"postback",
+                  "title":"INGREDIENTES",
+                  "payload":"receta1"
+               }, 
+              ]        
+              },
+              {
+                 "title":elementos[2].nombre,
+                 "image_url":elementos[2].urlimagen,
+                 "subtitle":elementos[2].descrip,
 
-	if (messageIDs) {
-		messageIDs.forEach(function (messageID) {
-			console.log("Received delivery confirmation for message ID: %s",
-				messageID);
-		});
-	}
+                "buttons":[
+                {
+                   "type":"postback",
+                  "title":"INGREDIENTES",
+                  "payload":"receta2"
+                 },    
+                ]        
+             },
+            
+           ];
+          fbService. sendGenericMessage(senderID, elements); 
+            },500)
+          })    
+        break;
 
-	console.log("All message before %d were delivered.", watermark);
-}
+        case 'receta0':
+          colors.RecetasPollo(function(elementos){
+          //console.log(elementos);
+           const plato=elementos[0].nombre;
+            const findplato =elementos.find( platos => platos.nombre === plato );
+             //console.log(findplato);
+              const imagenIngre0=findplato.ingre0;
+                //console.log(imagenIngre0);
+                 fbService.sendImageMessage(senderID,imagenIngre0);
+                 setTimeout(function(){
+                   let buttons = [  
+                     {
+                        type:"postback",
+                        title:"PREPARACIÓN",
+                        payload:"PREPARACÍON0"
+                     },
+                     {
+                         type:"postback",
+                        title:"MENÚ RECETAS",
+                        payload:"INICIAR_CIBO"
+                     },
+                   ];
+                 fbService.sendButtonMessage(senderID, "Seleccionar", buttons);
+                },2000) 
+           //     setTimeout(function(){
+           //      let replies = [
+           //        {
+           //        "content_type":"text",
+           //        "title":"REGRESO RECETAS",
+           //        "payload":"INICIO"
+           //        },  
+           //         {
+           //        "content_type":"text",
+           //        "title":"PREPARACIÓN",
+           //        "payload":"PREPARACÍON0"
+           //        },  
+           //       ];  
+           //  fbService.sendQuickReply(senderID,"Regresa a menu de recetas ",replies);  
+           // },2000)
+          });       
+        break;
 
-/*
- * Authorization Event
- *
- * The value for 'optin.ref' is defined in the entry point. For the "Send to 
- * Messenger" plugin, it is the 'data-ref' field. Read more at 
- * https://developers.facebook.com/docs/messenger-platform/webhook-reference/authentication
- *
- */
-function receivedAuthentication(event) {
-	var senderID = event.sender.id;
-	var recipientID = event.recipient.id;
-	var timeOfAuth = event.timestamp;
+        case 'PREPARACÍON0':
+        colors.RecetasPollo(function(elementos){
+          //console.log(elementos);
+           const plato=elementos[0].nombre;
+            const findplato =elementos.find( platos => platos.nombre === plato );
+             //console.log(findplato);
+              const prepa1=findplato.preparacion1;
+               const prepa2=findplato.preparacion2;
+                const prepa3=findplato.preparacion3;
+                 console.log(prepa1,prepa2,prepa3);
+                 fbService.sendImageMessage(senderID,prepa1);
+                 setTimeout(function(){
+                 fbService.sendImageMessage(senderID,prepa2);
+                 },1500)  
+               setTimeout(function(){
+              fbService.sendImageMessage(senderID,prepa3);
+             },3000)          
+         });        
+        break;
 
-	// The 'ref' field is set in the 'Send to Messenger' plugin, in the 'data-ref'
-	// The developer can set this to an arbitrary value to associate the 
-	// authentication callback with the 'Send to Messenger' click event. This is
-	// a way to do account linking when the user clicks the 'Send to Messenger' 
-	// plugin.
-	var passThroughParam = event.optin.ref;
+        case 'receta1':
+        colors.RecetasPollo(function(elementos){
+         const plato1=elementos[1].nombre;
+            const findplato1 =elementos.find( platos => platos.nombre === plato1 );
+             //console.log(findplato);
+              const imagenIngre0=findplato1.ingre0;
+                //console.log(imagenIngre0);
+                 fbService.sendImageMessage(senderID,imagenIngre0);
+                 setTimeout(function(){
+                   let buttons = [  
+                     {
+                        type:"postback",
+                        title:"PREPARACIÓN",
+                        payload:"PREPARACÍON1"
+                     },
+                     {
+                         type:"postback",
+                        title:"MENÚ RECETAS",
+                        payload:"INICIAR_CIBO"
+                     },
+                   ];
+                 fbService.sendButtonMessage(senderID, "Seleccionar", buttons);
+                },2000) 
+              });   
+        break;
 
-	console.log("Received authentication for user %d and page %d with pass " +
-		"through param '%s' at %d", senderID, recipientID, passThroughParam,
-		timeOfAuth);
+        case 'PREPARACÍON1':
+        colors.RecetasPollo(function(elementos){
+          //console.log(elementos);
+           const plato2=elementos[1].nombre;
+            const findplato1 =elementos.find( platos => platos.nombre === plato2 );
+             //console.log(findplato);
+              const prepa1=findplato1.preparacion1;
+               const prepa2=findplato1.preparacion2;
+                const prepa3=findplato1.preparacion3;
+                 console.log(prepa1,prepa2,prepa3);
+                 fbService.sendImageMessage(senderID,prepa1);
+                 setTimeout(function(){
+                 fbService.sendImageMessage(senderID,prepa2);
+                 },1500)  
+               setTimeout(function(){
+              fbService.sendImageMessage(senderID,prepa3);
+             },3000)          
+         });        
+        break;
 
-	// When an authentication is received, we'll send a message back to the sender
-	// to let them know it was successful.
-	sendTextMessage(senderID, "Authentication successful");
-}
+        case 'receta2':
+        colors.RecetasPollo(function(elementos){
+        const plato2=elementos[2].nombre;
+            const findplato2 =elementos.find( platos => platos.nombre === plato2 );
+             //console.log(findplato);
+              const imagenIngre0=findplato2.ingre0;
+                //console.log(imagenIngre0);
+                 fbService.sendImageMessage(senderID,imagenIngre0);
+                 setTimeout(function(){
+                   let buttons = [  
+                     {
+                        type:"postback",
+                        title:"PREPARACIÓN",
+                        payload:"PREPARACÍON2"
+                     },
+                     {
+                         type:"postback",
+                        title:"MENÚ RECETAS",
+                        payload:"INICIAR_CIBO"
+                     },
+                   ];
+                 fbService.sendButtonMessage(senderID, "Seleccionar", buttons);
+                },2000) 
+              });   
+        break;
 
-/*
- * Verify that the callback came from Facebook. Using the App Secret from 
- * the App Dashboard, we can verify the signature that is sent with each 
- * callback in the x-hub-signature field, located in the header.
- *
- * https://developers.facebook.com/docs/graph-api/webhooks#setup
- *
- */
-function verifyRequestSignature(req, res, buf) {
-	var signature = req.headers["x-hub-signature"];
+        case 'PREPARACÍON2':
+        colors.RecetasPollo(function(elementos){
+          //console.log(elementos);
+           const plato2=elementos[2].nombre;
+            const findplato2 =elementos.find( platos => platos.nombre === plato2 );
+             //console.log(findplato);
+              const prepa1=findplato2.preparacion1;
+               const prepa2=findplato2.preparacion2;
+                const prepa3=findplato2.preparacion3;
+                 console.log(prepa1,prepa2,prepa3);
+                 fbService.sendImageMessage(senderID,prepa1);
+                 setTimeout(function(){
+                 fbService.sendImageMessage(senderID,prepa2);
+                 },1500)  
+               setTimeout(function(){
+              fbService.sendImageMessage(senderID,prepa3);
+             },3000)          
+         })        
+        break;
 
-	if (!signature) {
-		throw new Error('Couldn\'t validate the signature.');
-	} else {
-		var elements = signature.split('=');
-		var method = elements[0];
-		var signatureHash = elements[1];
+        case 'receta3':
+        colors.RecetasPollo(function(elementos){
+         const plato3=elementos[3].nombre;
+            const findplato3 =elementos.find( platos => platos.nombre === plato3 );
+             //console.log(findplato);
+              const imagenIngre0=findplato3.ingre0;
+                //console.log(imagenIngre0);
+                 fbService.sendImageMessage(senderID,imagenIngre0);
+                 setTimeout(function(){
+                   let buttons = [  
+                     {
+                        type:"postback",
+                        title:"PREPARACIÓN",
+                        payload:"PREPARACÍON3"
+                     },
+                     {
+                         type:"postback",
+                        title:"MENÚ RECETAS",
+                        payload:"INICIAR_CIBO"
+                     },
+                   ];
+                 fbService.sendButtonMessage(senderID, "Seleccionar", buttons);
+                },2000) 
+               });  
+        break;
 
-		var expectedHash = crypto.createHmac('sha1', config.FB_APP_SECRET)
-			.update(buf)
-			.digest('hex');
+        case 'PREPARACÍON3':
+        colors.RecetasPollo(function(elementos){
+          //console.log(elementos);
+           const plato3=elementos[3].nombre;
+            const findplato3 =elementos.find( platos => platos.nombre === plato3 );
+             //console.log(findplato);
+              const prepa1=findplato3.preparacion1;
+               const prepa2=findplato3.preparacion2;
+                const prepa3=findplato3.preparacion3;
+                 console.log(prepa1,prepa2,prepa3);
+                 fbService.sendImageMessage(senderID,prepa1);
+                 setTimeout(function(){
+                 fbService.sendImageMessage(senderID,prepa2);
+                 },1500)  
+               setTimeout(function(){
+              fbService.sendImageMessage(senderID,prepa3);
+             },3000)          
+         });        
+        break;
 
-		if (signatureHash != expectedHash) {
-			throw new Error("Couldn't validate the request signature.");
-		}
-	}
-}
+        
 
-function isDefined(obj) {
-	if (typeof obj == 'undefined') {
-		return false;
-	}
+        default:
+            //unindentified payload
+            fbService.sendTextMessage(senderID, "I'm not sure what you want. Can you be more specific?");
+            break;
 
-	if (!obj) {
-		return false;
-	}
+    }
 
-	return obj != null;
+    console.log("Received postback for user %d and page %d with payload '%s' " +
+        "at %d", senderID, recipientID, payload, timeOfPostback);
+
 }
 
 // Spin up the server
 app.listen(app.get('port'), function () {
-	console.log('running on port', app.get('port'))
+    console.log('running on port', app.get('port'))
 })
