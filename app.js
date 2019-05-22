@@ -303,7 +303,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		   let respuesta=JSON.parse(body);
 		   //console.log(respuesta);
 			  if (respuesta.hasOwnProperty("hits")){
-				    const imagen0=respuesta["hits"]["recipe"]["image"];
+				    const imagen0=respuesta["hits"][0]["recipe"]["image"][0];
 					console.log(imagen0);
 						
 					  }
