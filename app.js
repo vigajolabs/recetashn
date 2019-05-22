@@ -303,13 +303,9 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		   let respuesta=JSON.parse(body);
 		   //console.log(respuesta);
 			  if (respuesta.hasOwnProperty("hits")){
-				    const imagen0=respuesta["hits"][0]["recipe"][0]["image"];
-					 const imagen1=respuesta["hits"][0]["recipe"][1]["image"];
-					     console.log(imagen0);
-						   console.log(imagen1);
-					  // //---------------------------------
-					   // colors.buscarCOMIDA(sender,link);
-						//--------------------------------	 
+				    const imagen0=respuesta["hits"][0]["recipe"]["image"];
+					console.log(imagen0);
+						
 					  }
 				   } else {
 				console.log('error busqueda');
