@@ -278,6 +278,10 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 	  
 	 case "prueba2":
 	 console.log("prueba");
+	 break;	
+	  
+	 case "prueba21":
+	 console.log("prueba");
 	  console.log(parameters.fields);
         //------
         if (parameters.fields['COMIDA'].stringValue==null){
