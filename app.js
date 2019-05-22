@@ -303,7 +303,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		   let respuesta=JSON.parse(body);
 		   //console.log(respuesta);
 			  if (respuesta.hasOwnProperty("hits")){
-				    const nombre=respuesta["hits"][0]["recipe"]["uri"]["label"];
+				    const nombre=respuesta["hits"][0]["recipe"];
 					   console.log(nombre);
 					  // //---------------------------------
 					   // colors.buscarCOMIDA(sender,link);
