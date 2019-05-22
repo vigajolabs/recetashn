@@ -275,6 +275,44 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
     switch (action) {
 
       //inicio
+	  
+	 case "prueba2":
+	 console.log("prueba");
+	  console.log(parameters.fields);
+        //------
+        if (parameters.fields['COMIDA'].stringValue==null){
+          sendTextMessage(sender,"Recueda que para hacer una busqueda debes escribir BUSCAR antes de la busqueda, Ej.\n1-buscar accidente carretera CA-5 \n2-Buscar partido olimpia-motagua");
+       
+        //------
+        //if ( parameters.fields.hasOwnProperty('geo-city') && parameters.fields['geo-city'].stringValue!='') {
+	   } else if ( parameters.fields.hasOwnProperty('COMIDA') && parameters.fields['COMIDA'].stringValue!='') {
+		  request({
+		 //url: 'http://api.openweathermap.org/data/2.5/weather', //URL to hit
+			url: 'https://test-es.edamam.com/recipes/',
+			  qs: {
+				//appid: config.WEATHER_API_KEY,
+		//q: parameters.fields['geo-city'].stringValue
+		q: parameters.fields['COMIDA'].stringValue
+			  }, //Query string data
+		  }, function(error, response, body){
+		 if( response.statusCode === 200) {
+		   let respuesta=JSON.parse(body);
+		   // console.log(respuesta);
+			 if (respuesta.hasOwnProperty("items")){
+				   const link=respuesta["items"][0]["link"];
+					  console.log(link);
+					  //---------------------------------
+					   colors.buscarCOMIDA(sender,link);
+						//--------------------------------	 
+					  }
+				   } else {
+				console.log('error busqueda');
+			   }
+			 });
+			} else {
+		  fbServicesendTextMessage(sender, 'NO tenemos ese modelo.');
+		}
+	break;
 
       case "preguntas.recibirrecetas":
       console.log(parameters.fields);
