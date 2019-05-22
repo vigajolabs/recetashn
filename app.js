@@ -292,7 +292,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 	   } else if ( parameters.fields.hasOwnProperty('COMIDA') && parameters.fields['COMIDA'].stringValue!='') {
 		  request({
 		 //url: 'http://api.openweathermap.org/data/2.5/weather', //URL to hit
-			url: 'https://api.edamam.com/search?q&app_id=c8004eba&app_key=ea1f3c160aa46a042e7fb25b2a546a5a&from=0&to=3',
+			url: 'https://api.edamam.com/search?q=chicken&app_id=c8004eba&app_key=ea1f3c160aa46a042e7fb25b2a546a5a&from=0&to=3',
 			  qs: {
 				//appid: config.WEATHER_API_KEY,
 		//q: parameters.fields['geo-city'].stringValue
