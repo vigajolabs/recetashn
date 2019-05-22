@@ -304,7 +304,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		   //console.log(respuesta);
 			  if (respuesta.hasOwnProperty("hits")){
 				    const imagen0=respuesta["hits"][0]["recipe"][0]["image"];
-					 const imagen1=respuesta["hits"][0]["recipe"][1]["image"]'
+					 const imagen1=respuesta["hits"][0]["recipe"][1]["image"];
 					     console.log(imagen0);
 						   console.log(imagen1);
 					  // //---------------------------------
