@@ -276,11 +276,11 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 
       //inicio
 	  
-	 case "prueba2":
+	 case "prueba21":
 	 console.log("prueba");
 	 break;	
 	  
-	 case "prueba21":
+	 case "prueba2":
 	 console.log("prueba");
 	  console.log(parameters.fields);
         //------
