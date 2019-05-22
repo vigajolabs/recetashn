@@ -306,12 +306,11 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 				    //const imagen0=respuesta["hits"][0]["recipe"]["image"];
 			//for (let i=0,l=hits.recipe.image;i<1;i++){		
 			const imagen0=respuesta.hits;
-			 const imagen1=respuesta.hits.recipe[0].uri;	
-			  const imagen2=respuesta.hits.recipe[1].uri;	
+			 const imagen1=respuesta.hits[0].recipe.uri;	
+			  //const imagen2=respuesta.hits.recipe[1].uri;	
 			  console.log(imagen0);
 			   console.log(imagen1);
-			    console.log(imagen2);
-					
+			
 			  //  }
 			  }
 			 } else {
