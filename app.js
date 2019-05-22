@@ -302,9 +302,9 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		 if( response.statusCode === 200) {
 		   let respuesta=JSON.parse(body);
 		   console.log(respuesta);
-			 // if (respuesta.hasOwnProperty("items")){
-				   // const link=respuesta["items"][0]["link"];
-					  // console.log(link);
+			  if (respuesta.hasOwnProperty("hits")){
+				    const link=respuesta["hits"][0]["recipe"];
+					   console.log(link);
 					  // //---------------------------------
 					   // colors.buscarCOMIDA(sender,link);
 						//--------------------------------	 
