@@ -304,16 +304,18 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		   //console.log(respuesta);
 			  if (respuesta.hasOwnProperty("hits")){
 				    //const imagen0=respuesta["hits"][0]["recipe"]["image"];
-					const imagen0=respuesta.hits[0].recipe.image;
+			for (let i=0,l=hits.recipe.image;i<1,i++){		
+					// const imagen0=respuesta.hits[0].recipe.image;
+				const imagen0=hits.recipe.image[i];	
 					console.log(imagen0);
-						
-					  }
-				   } else {
-				console.log('error busqueda');
-			   }
-			 });
-			} else {
-		  fbServicesendTextMessage(sender, 'NO tenemos ese modelo.');
+			    }
+			  }
+			 } else {
+			console.log('error busqueda');
+			}
+		  });
+		 } else {
+		fbServicesendTextMessage(sender, 'NO tenemos ese modelo.');
 		}
 	break;
 
