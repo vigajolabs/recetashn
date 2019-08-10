@@ -302,7 +302,7 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		 if( response.statusCode === 200) {
 		   let respuesta=JSON.parse(body);
 		    console.log(respuesta);
-			 console.log(respuesta.hits.recipe);
+			 console.log(respuesta.hits);
 			  // if (respuesta.hasOwnProperty("hits")){ 	
 			// const imagen0=respuesta.hits;
 			 // console.log(imagen0);
