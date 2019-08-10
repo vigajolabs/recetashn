@@ -301,18 +301,11 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 		  }, function(error, response, body){
 		 if( response.statusCode === 200) {
 		   let respuesta=JSON.parse(body);
-		   //console.log(respuesta);
-			  if (respuesta.hasOwnProperty("hits")){
-				    //const imagen0=respuesta["hits"][0]["recipe"]["image"];
-			//for (let i=0,l=hits.recipe.image;i<1;i++){		
-			//const imagen0=respuesta.hits;
-			 const imagen1=respuesta.hits[0].recipe[0].uri;	
-			  //const imagen2=respuesta.hits.recipe[1].uri;	
+		    console.log(respuesta);
+			  // if (respuesta.hasOwnProperty("hits")){ 	
+			// const imagen0=respuesta.hits;
 			 // console.log(imagen0);
-			   console.log(imagen1);
-			
-			  //  }
-			  }
+			  // }
 			 } else {
 			console.log('error busqueda');
 			}
