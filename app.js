@@ -21,7 +21,7 @@ const FacebookStrategy = require('passport-facebook').Strategy;
 const session = require('express-session');
 const unirest = require('unirest');
 
-//---------
+//-----------
 const imagesopas="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS68eVtaZ3c6xmmFs72JTgbr8F6ozrGg25xu8PwdrumxozrxfNU";
 const imagesrapidas="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSEYwEJXv2mP-jHnt-3rFfWUTTXjeSzdVXb8nAdyk1NjVggxF_lBw";
 const imagespollo="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTFHO8yhXCy9Z5SWlfLB9PLYKjbKcAyZOajZjiyVCn2jp79cxxTpQ";
