@@ -19,7 +19,8 @@ const fbService = require('./services/fb-service');
 const passport = require('passport');
 const FacebookStrategy = require('passport-facebook').Strategy;
 const session = require('express-session');
-const unirest = require('unirest');
+const unirest = require("unirest");
+
 
 //--------------
 const imagesopas="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS68eVtaZ3c6xmmFs72JTgbr8F6ozrGg25xu8PwdrumxozrxfNU";
@@ -277,30 +278,23 @@ function handleDialogFlowAction(sender, action, messages, contexts, parameters) 
 
       //inicio
 	  
-	 case "prueba2":
-	 // var unirest = require("unirest");
+	case "prueba2":
+	var req = unirest("GET", "https://deezerdevs-deezer.p.rapidapi.com/search");
 
-	 var req = unirest("GET", "https://voicerss-text-to-speech.p.rapidapi.com/");
+	req.query({
+		"q": "eminem"
+	});
 
-		req.query({
-		"r": "0",
-		"c": "mp3",
-		"f": "8khz_8bit_mono",
-		"src": "Hello, world!",
-		"hl": "en-us",
-		"key": "e23ac7cf1911403eb5b70ee93bdb50f8"
-		});
-
-		req.headers({
-		"x-rapidapi-host": "voicerss-text-to-speech.p.rapidapi.com",
+	req.headers({
+		"x-rapidapi-host": "deezerdevs-deezer.p.rapidapi.com",
 		"x-rapidapi-key": "7c8e41fc60msh590ebc639c0e55ap186d21jsnb45f32a09571"
-		});
+	});
 
-		req.end(function (res) {
-		if (res.error) throw new Error(res.error);
+	req.end(function (res) {
+	if (res.error) throw new Error(res.error);
 
-		console.log(res.body);
-	  });
+	console.log(res.body);
+	});
 	 break;	
 	  
 	 case "prueba21":
